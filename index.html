@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CodeDrop</title>
+<style>
+  :root { --bg:#f5f6fa; --card:#fff; --text:#1c1e2b; --muted:#6b7084; --accent:#5b5bf0; --accent-d:#4646d6; --border:#e2e4ee; --ok:#1a9e5c; --err:#d93a3a; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#12131a; --card:#1c1e2b; --text:#eceef7; --muted:#9296ad; --border:#2e3144; --accent:#7676ff; --accent-d:#8a8aff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+  header { text-align:center; padding:40px 16px 8px; }
+  header h1 { margin:0; font-size:2rem; letter-spacing:-.02em; }
+  header p { margin:6px 0 0; color:var(--muted); }
+  main { max-width:900px; margin:0 auto; padding:24px 16px 48px; display:grid; gap:20px; grid-template-columns:1fr 1fr; }
+  @media (max-width:720px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:24px; }
+  .card h2 { margin:0 0 16px; font-size:1.15rem; }
+  .drop { border:2px dashed var(--border); border-radius:12px; padding:36px 16px; text-align:center; cursor:pointer; transition:.15s; color:var(--muted); }
+  .drop:hover, .drop.over { border-color:var(--accent); background:color-mix(in srgb, var(--accent) 8%, transparent); color:var(--text); }
+  .drop strong { color:var(--text); display:block; margin-bottom:4px; }
+  input[type=file] { display:none; }
+  .fname { margin-top:12px; font-size:.9rem; word-break:break-all; }
+  button { font:inherit; font-weight:600; border:0; border-radius:10px; padding:12px 18px; background:var(--accent); color:#fff; cursor:pointer; width:100%; margin-top:14px; }
+  button:hover:not(:disabled) { background:var(--accent-d); }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  button.ghost { background:transparent; color:var(--accent); border:1px solid var(--border); margin-top:10px; }
+  .bar { height:8px; background:var(--border); border-radius:99px; overflow:hidden; margin-top:14px; display:none; }
+  .bar > i { display:block; height:100%; width:0; background:var(--accent); transition:width .1s; }
+  .code { font-size:3.2rem; font-weight:800; letter-spacing:.25em; text-align:center; padding:12px 0 12px .25em; font-variant-numeric:tabular-nums; color:var(--accent); }
+  .note { color:var(--muted); font-size:.88rem; text-align:center; }
+  .msg { margin-top:12px; font-size:.92rem; min-height:1.2em; }
+  .msg.err { color:var(--err); } .msg.ok { color:var(--ok); }
+  .digits { display:flex; gap:10px; justify-content:center; }
+  .digits input { width:60px; height:72px; font-size:2rem; font-weight:700; text-align:center; border:2px solid var(--border); border-radius:12px; background:transparent; color:var(--text); font-family:inherit; }
+  .digits input:focus { outline:none; border-color:var(--accent); }
+  .hidden { display:none !important; }
+  .info { margin-top:16px; padding:14px; border-radius:12px; background:var(--bg); font-size:.92rem; word-break:break-all; }
+  .info small { color:var(--muted); display:block; margin-top:2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CodeDrop</h1>
+  <p>Share a file with a 4-digit code. No accounts.</p>
+</header>
+
+<main>
+  <!-- SEND -->
+  <section class="card" id="send">
+    <h2>Send a file</h2>
+    <div id="uploadView">
+      <label class="drop" id="drop">
+        <strong>Drop a file here</strong>
+        or click to choose
+        <input type="file" id="file">
+      </label>
+      <div class="fname" id="fname"></div>
+      <div class="bar" id="bar"><i></i></div>
+      <button id="uploadBtn" disabled>Upload</button>
+      <div class="msg" id="upMsg"></div>
+    </div>
+    <div id="doneView" class="hidden">
+      <div class="note">Your code</div>
+      <div class="code" id="code">0000</div>
+      <div class="note" id="doneNote"></div>
+      <button id="copyBtn">Copy code</button>
+      <button class="ghost" id="anotherBtn">Send another file</button>
+    </div>
+  </section>
+
+  <!-- RECEIVE -->
+  <section class="card" id="receive">
+    <h2>Receive a file</h2>
+    <div class="digits" id="digits">
+      <input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Digit 1">
+      <input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Digit 2">
+      <input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Digit 3">
+      <input inputmode="numeric" maxlength="1" autocomplete="off" aria-label="Digit 4">
+    </div>
+    <div class="info hidden" id="info"></div>
+    <button id="dlBtn" disabled>Find file</button>
+    <div class="msg" id="dlMsg"></div>
+  </section>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (b) => b < 1024 ? b + ' B' : b < 1048576 ? (b/1024).toFixed(1) + ' KB' : b < 1073741824 ? (b/1048576).toFixed(1) + ' MB' : (b/1073741824).toFixed(2) + ' GB';
+const dur = (mins) => mins >= 120 ? Math.round(mins / 60) + ' hours' : mins >= 60 ? '1 hour' : mins + ' min';
+const esc =(s) => s.replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+/* ---------- Send ---------- */
+let chosen = null;
+const fileInput = $('file'), drop = $('drop');
+function choose(f) {
+  chosen = f || null;
+  $('fname').textContent = f ? `${f.name} (${fmt(f.size)})` : '';
+  $('uploadBtn').disabled = !f;
+  $('upMsg').textContent = ''; $('upMsg').className = 'msg';
+}
+fileInput.addEventListener('change', () => choose(fileInput.files[0]));
+['dragenter','dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+['dragleave','drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+drop.addEventListener('drop', ev => { const f = ev.dataTransfer.files[0]; if (f) choose(f); });
+
+$('uploadBtn').addEventListener('click', () => {
+  if (!chosen) return;
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/upload');
+  xhr.setRequestHeader('X-Filename', encodeURIComponent(chosen.name));
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  $('uploadBtn').disabled = true;
+  $('bar').style.display = 'block';
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) $('bar').firstElementChild.style.width = (e.loaded / e.total * 100) + '%'; };
+  xhr.onload = () => {
+    let r = {}; try { r = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status === 200) {
+      $('code').textContent = r.code;
+      $('doneNote').textContent = `${r.name} · ${fmt(r.size)} · expires in ${dur(r.expiresInMinutes)}`;
+      $('uploadView').classList.add('hidden'); $('doneView').classList.remove('hidden');
+    } else {
+      $('upMsg').textContent = r.error || 'Upload failed.'; $('upMsg').className = 'msg err';
+      $('uploadBtn').disabled = false; $('bar').style.display = 'none';
+    }
+  };
+  xhr.onerror = () => { $('upMsg').textContent = 'Network error. Is the server running?'; $('upMsg').className = 'msg err'; $('uploadBtn').disabled = false; $('bar').style.display = 'none'; };
+  xhr.send(chosen);
+});
+
+$('copyBtn').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('code').textContent); $('copyBtn').textContent = 'Copied!'; setTimeout(() => $('copyBtn').textContent = 'Copy code', 1500); } catch {}
+});
+$('anotherBtn').addEventListener('click', () => {
+  fileInput.value = ''; choose(null);
+  $('bar').style.display = 'none'; $('bar').firstElementChild.style.width = '0';
+  $('doneView').classList.add('hidden'); $('uploadView').classList.remove('hidden');
+});
+
+/* ---------- Receive ---------- */
+const boxes = [...document.querySelectorAll('#digits input')];
+let foundCode = null, checking = false;
+const code = () => boxes.map(b => b.value).join('');
+
+function resetFound() { foundCode = null; $('info').classList.add('hidden'); $('dlBtn').textContent = 'Find file'; $('dlBtn').disabled = code().length !== 4; }
+
+boxes.forEach((b, i) => {
+  b.addEventListener('input', () => {
+    b.value = b.value.replace(/\D/g, '').slice(-1);
+    $('dlMsg').textContent = ''; $('dlMsg').className = 'msg';
+    resetFound();
+    if (b.value && i < 3) boxes[i + 1].focus();
+    if (code().length === 4) lookup();
+  });
+  b.addEventListener('keydown', (e) => {
+    if (e.key === 'Backspace' && !b.value && i > 0) { boxes[i - 1].focus(); boxes[i - 1].value = ''; resetFound(); }
+    if (e.key === 'ArrowLeft' && i > 0) boxes[i - 1].focus();
+    if (e.key === 'ArrowRight' && i < 3) boxes[i + 1].focus();
+    if (e.key === 'Enter') $('dlBtn').click();
+  });
+  b.addEventListener('paste', (e) => {
+    const t = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 4);
+    if (!t) return;
+    e.preventDefault();
+    boxes.forEach((x, j) => x.value = t[j] || '');
+    resetFound();
+    (boxes[Math.min(t.length, 3)]).focus();
+    if (t.length === 4) lookup();
+  });
+});
+
+async function lookup() {
+  if (checking || code().length !== 4) return;
+  checking = true; $('dlBtn').disabled = true; $('dlBtn').textContent = 'Checking…';
+  try {
+    const res = await fetch('/api/info/' + code());
+    const r = await res.json();
+    if (res.ok) {
+      foundCode = code();
+      const mins = Math.max(1, Math.round(r.expiresInSeconds / 60));
+      $('info').innerHTML = `<strong>${esc(r.name)}</strong><small>${fmt(r.size)} · expires in about ${dur(mins)}</small>`;
+      $('info').classList.remove('hidden');
+      $('dlBtn').textContent = 'Download'; $('dlBtn').disabled = false;
+    } else {
+      $('dlMsg').textContent = r.error || 'Something went wrong.'; $('dlMsg').className = 'msg err';
+      $('dlBtn').textContent = 'Find file'; $('dlBtn').disabled = false;
+    }
+  } catch {
+    $('dlMsg').textContent = 'Network error.'; $('dlMsg').className = 'msg err';
+    $('dlBtn').textContent = 'Find file'; $('dlBtn').disabled = false;
+  }
+  checking = false;
+}
+
+$('dlBtn').addEventListener('click', () => {
+  if (foundCode) {
+    window.location.href = '/api/download/' + foundCode;
+    $('dlMsg').textContent = 'Download started.'; $('dlMsg').className = 'msg ok';
+  } else lookup();
+});
+</script>
+</body>
+</html>
